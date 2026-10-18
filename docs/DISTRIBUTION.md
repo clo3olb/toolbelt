@@ -39,6 +39,7 @@
 4. `make publish NOTES=docs/releases/<버전>.md` — 미리 보려면 앞에 `DRY_RUN=1`
    - 빌드·서명 → zip → EdDSA 서명·검증 → `appcast.xml` 생성 → `gh release create`로 zip과 appcast.xml 게시 → 피드 확인
    - 사용자의 앱은 `https://github.com/clo3olb/toolbelt/releases/latest/download/appcast.xml`을 하루 한 번 확인한다
+   - 게시 직후 `releases/latest` 연결이 갱신되는 데 1~2분 걸린다 (스크립트가 최대 5분 기다리며 확인)
 
 ### 자동 업데이트 (Sparkle)
 - Sparkle 2.9.x (SwiftPM). `Contents/Frameworks/Sparkle.framework`에 넣고 안쪽 실행 파일부터 같은 인증서로 서명 (`make app`).

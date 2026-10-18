@@ -89,8 +89,17 @@ if [ "$DRY_RUN" = "1" ]; then echo "DRY_RUN: 게시하지 않았습니다 ($ZIP,
 gh release create "$TAG" "$ZIP" "$APPCAST" --repo "$REPO" --title "Toolbelt $VERSION" --notes-file "$NOTES"
 
 # 6. 배포된 appcast가 이 버전을 가리키는지 확인
-sleep 3
-PUBLISHED=$(curl -fsL "https://github.com/$REPO/releases/latest/download/appcast.xml" \
-    | sed -n 's:.*<sparkle\:shortVersionString>\(.*\)</sparkle\:shortVersionString>.*:\1:p')
-[ "$PUBLISHED" = "$VERSION" ] && echo "완료: $TAG 게시, 자동 업데이트 피드가 $VERSION을 가리킵니다." \
-    || { echo "경고: 피드 버전이 '$PUBLISHED'입니다. 잠시 뒤 다시 확인하세요."; exit 1; }
+#    게시 직후 GitHub의 releases/latest 연결이 갱신되는 데 1~2분 걸리므로 최대 5분 기다린다.
+for i in $(seq 1 20); do
+    PUBLISHED=$(curl -fsL "https://github.com/$REPO/releases/latest/download/appcast.xml" 2>/dev/null \
+        | sed -n 's:.*<sparkle\:shortVersionString>\(.*\)</sparkle\:shortVersionString>.*:\1:p' || true)
+    if [ "$PUBLISHED" = "$VERSION" ]; then
+        echo "완료: $TAG 게시, 자동 업데이트 피드가 $VERSION을 가리킵니다."
+        exit 0
+    fi
+    echo "피드 갱신 대기 중… (${PUBLISHED:-아직 이전 버전})"
+    sleep 15
+done
+echo "경고: 5분이 지나도 피드가 $VERSION을 가리키지 않습니다. 릴리스는 게시됐으니 잠시 뒤 다시 확인하세요:"
+echo "  curl -sL https://github.com/$REPO/releases/latest/download/appcast.xml | grep shortVersionString"
+exit 1
