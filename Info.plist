@@ -8,12 +8,15 @@
     <key>CFBundleExecutable</key><string>Toolbelt</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.2.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>NSMicrophoneUsageDescription</key><string>녹음할 때 마이크 소리를 저장합니다.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>저장한 녹음을 기기 안에서 글로 전사합니다.</string>
     <key>LSUIElement</key><true/>
+    <key>SUFeedURL</key><string>https://github.com/clo3olb/toolbelt/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>vY3z/8Eb6mtGh+aU70MbwamUAu61bfNeWzeB3NR7his=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>

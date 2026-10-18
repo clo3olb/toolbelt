@@ -16,7 +16,8 @@ macOS 26 이상, Apple Silicon.
 4. Caps Lock 한/영 전환과 통화 자동 녹음은 **기본으로 꺼져 있다** (키보드·녹음 동작을 바꾸므로). 시작 안내나 메인 창에서 켠다.
 5. 메뉴바 🔧 → 아래 **설정**에서 로그인 시 자동 실행, 팝오버에 보일 기능과 순서를 고른다.
 
-업데이트: 새 버전 zip을 받아 기존 앱을 덮어쓴다. 같은 인증서로 서명돼 있어 권한은 유지된다.
+업데이트: 0.2.0부터 **자동 업데이트**(Sparkle). 새 버전이 나오면 앱이 알려 주고 설치까지 한다 (메인 창 → 설정 → 업데이트에서 끄기·지금 확인).
+같은 인증서로 서명돼 있어 업데이트 후에도 권한은 유지된다. 0.1.0 사용자는 0.2.0을 한 번 직접 받아 덮어써야 한다.
 녹음·전사는 모두 이 Mac 안에서 처리되고 외부로 보내지 않는다 (`~/Library/Application Support/Toolbelt/Recordings/`).
 
 메뉴바의 🔧 아이콘을 누르면 팝오버 패널이 열린다 (`Sources/Toolbelt/Panel/`). 기본 순서는 녹음, 시스템, 창 배치, 디스플레이, 키보드.
@@ -134,6 +135,7 @@ make install   # 빌드 → /Applications/Toolbelt.app 설치 → 실행
 make run       # build/ 에서 바로 실행
 make icon      # Scripts/make-icon.swift로 Resources/AppIcon.icns 재생성
 make release   # 배포용 build/Toolbelt-<버전>.zip (Toolbelt Signing 서명 필수) — docs/DISTRIBUTION.md
+make publish NOTES=docs/releases/<버전>.md   # zip·EdDSA 서명·appcast → GitHub Release (DRY_RUN=1로 미리 보기)
 make clean
 ```
 

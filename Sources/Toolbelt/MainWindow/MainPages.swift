@@ -250,6 +250,8 @@ struct SettingsPage: View {
                 Button("시작 안내 다시 보기") { OnboardingWindowController.shared.show() }.controlSize(.small)
             }
 
+            UpdateCard(updater: .shared)
+
             Card(title: "녹음") {
                 Toggle("통화 자동 녹음", isOn: Binding(get: { recorder.autoRecordCalls }, set: recorder.setAutoRecordCalls))
                     .toggleStyle(.switch)
@@ -275,6 +277,26 @@ struct SettingsPage: View {
                 PermissionRow(title: "화면 및 시스템 오디오 녹음", detail: "컴퓨터 소리 녹음",
                               granted: CGPreflightScreenCaptureAccess(), action: recorder.openScreenPermissionSettings)
             }
+        }
+    }
+}
+
+private struct UpdateCard: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Card(title: "업데이트") {
+            HStack {
+                Text("현재 버전 \(Updater.version)").monospacedDigit()
+                Spacer()
+                Button("지금 확인", action: updater.checkForUpdates)
+                    .controlSize(.small).disabled(!updater.canCheck)
+            }
+            Toggle("자동으로 업데이트 확인 (하루 한 번)",
+                   isOn: Binding(get: { updater.automaticallyChecks }, set: updater.setAutomaticallyChecks))
+                .toggleStyle(.switch)
+            Link("릴리스 노트 보기", destination: URL(string: "https://github.com/clo3olb/toolbelt/releases")!)
+                .font(.callout)
         }
     }
 }

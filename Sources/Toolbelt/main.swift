@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = PanelController(statusItem: statusItem)
         installMainMenu()
         LastAppTracker.shared.start()
+        _ = Updater.shared   // 자동 업데이트 확인 시작
 
         HotKeyCenter.register([DisplayCommands.reconnectAll])
         WindowSnapSettings.shared.applyHotKeys()
@@ -31,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = NSMenuItem(title: "설정…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         appItem.submenu?.addItem(settings)
+        let update = NSMenuItem(title: "업데이트 확인…", action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        appItem.submenu?.addItem(update)
         appItem.submenu?.addItem(.separator())
         appItem.submenu?.addItem(withTitle: "Toolbelt 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(appItem)
@@ -49,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowItem.submenu = window
         main.addItem(windowItem)
         NSApp.mainMenu = main
+    }
+
+    @MainActor @objc private func checkForUpdates() {
+        Updater.shared.checkForUpdates()
     }
 
     @MainActor @objc private func openSettings() {

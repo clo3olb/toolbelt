@@ -19,24 +19,34 @@
 ### 지금 (관리자)
 - [x] `Toolbelt Signing` 인증서 백업: 키체인 접근 → 로그인 → 내 인증서 → `Toolbelt Signing` 우클릭 → 내보내기 → `.p12`(암호 설정) → 안전한 곳(비밀번호 관리자 등)에 보관
 - [x] 라이선스: MIT (`LICENSE`)
-- [ ] 공개 전 저장소 내용 점검 — 아래 "공개 전 점검" 참고
-- [ ] 저장소 공개 전환 (GitHub → Settings → Change visibility)
+- [x] 공개 전 저장소 내용 점검
+- [x] 공개 저장소 `clo3olb/toolbelt` (정리된 상태를 커밋 하나로 시작), v0.1.0 게시
 - [ ] 앱 이름("Toolbelt") 겹침 확인 (선택)
 
 ### 코드 (완료/진행)
 - [x] `make release` → `build/Toolbelt-<버전>.zip` (자체 서명 필수, 서명 검증 포함)
 - [x] Caps Lock 리매핑·통화 자동 녹음 **기본 꺼짐**
 - [x] README 설치 안내
-- [ ] 첫 실행 안내 화면 (권한 3종, F19 단축키)
+- [x] 첫 실행 안내 화면 (권한 3종, 선택 기능)
 - [ ] 전사 언어 선택 (현재 ko-KR 고정)
-- [ ] 정보 화면 (버전), 업데이트 확인 — 처음에는 GitHub Releases 링크, 나중에 Sparkle
+- [x] 정보(버전)·업데이트 확인·자동 업데이트 — Sparkle (0.2.0)
 - [ ] (선택) 영어
 
-### 릴리스 절차
-1. `Info.plist`의 `CFBundleShortVersionString`(예: 0.1.0 → 0.2.0)과 `CFBundleVersion`(정수 +1) 올리기
-2. `make release`
-3. GitHub → Releases → Draft a new release → 태그 `v0.2.0`, 변경 내용 작성, `build/Toolbelt-0.2.0.zip` 첨부 → Publish
-   (`gh release create v0.2.0 build/Toolbelt-0.2.0.zip --notes "..."` 로도 가능)
+### 릴리스 절차 (자동 업데이트 포함)
+1. `Info.plist`의 `CFBundleShortVersionString`(예: 0.2.0 → 0.3.0)과 `CFBundleVersion`(정수 +1 — Sparkle은 이 값으로 새 버전을 판단) 올리기
+2. 변경 내용을 `docs/releases/<버전>.md`에 쓰기 (## 제목, - 목록, **굵게** 정도의 마크다운)
+3. 커밋·push
+4. `make publish NOTES=docs/releases/<버전>.md` — 미리 보려면 앞에 `DRY_RUN=1`
+   - 빌드·서명 → zip → EdDSA 서명·검증 → `appcast.xml` 생성 → `gh release create`로 zip과 appcast.xml 게시 → 피드 확인
+   - 사용자의 앱은 `https://github.com/clo3olb/toolbelt/releases/latest/download/appcast.xml`을 하루 한 번 확인한다
+
+### 자동 업데이트 (Sparkle)
+- Sparkle 2.9.x (SwiftPM). `Contents/Frameworks/Sparkle.framework`에 넣고 안쪽 실행 파일부터 같은 인증서로 서명 (`make app`).
+- 업데이트 서명 키: EdDSA, 키체인 계정 `clo3olb-toolbelt`. 공개 키는 `Info.plist`의 `SUPublicEDKey`.
+- **개인 키를 잃으면 기존 사용자에게 업데이트를 보낼 수 없다** → 백업 필수:
+  `.build/artifacts/sparkle/Sparkle/bin/generate_keys --account clo3olb-toolbelt -x <파일>` 로 내보내 안전한 곳에 보관,
+  새 Mac에서는 `-f <파일>`로 가져온다.
+- appcast에는 최신 버전 하나만 담는다 (`releases/latest`가 항상 최신 릴리스를 가리킴).
 
 ## 공개 전 점검
 

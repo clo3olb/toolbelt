@@ -12,6 +12,8 @@ macOS 메뉴바 유틸리티 앱 **Toolbelt**. 여러 기능을 계속 추가해
 - `make install` → `.build/` 빌드 → `build/Toolbelt.app` 번들링 → `Toolbelt Signing` 인증서로 서명 → `/Applications/Toolbelt.app` 설치 → 실행.
   설치 전 기존 앱은 `make quit`(osascript 정상 종료 → 녹음 중이면 파일 마무리, 10초 뒤 pkill)으로 끈다. `pkill`만 쓰면 녹음 파일이 마무리되지 않는다.
 - `make release` → 배포용 `build/Toolbelt-<버전>.zip`. **항상 `Toolbelt Signing`으로 서명**해야 사용자 권한이 업데이트 후에도 유지된다 (ad-hoc 금지).
+- `make publish NOTES=docs/releases/<버전>.md` → zip EdDSA 서명·appcast.xml 생성·GitHub Release 게시 (`Scripts/publish.sh`, `DRY_RUN=1`로 미리 보기).
+  `CFBundleVersion`을 반드시 올려야 Sparkle이 새 버전으로 인식한다. Sparkle.framework 안쪽은 `make app`이 같은 인증서로 서명한다.
 - 앱 아이콘: `Scripts/make-icon.swift`가 원본을 그리고 `make icon`이 `Resources/AppIcon.icns`를 만든다(커밋됨).
 - 메인 창에서 ⌘C·⌘A·⌘W가 동작하도록 `main.swift`에서 최소 `NSApp.mainMenu`를 만든다 (LSUIElement라 메뉴바는 안 보임).
 - `Info.plist`는 루트에 있고 Makefile이 번들에 복사한다. `LSUIElement`(Dock 아이콘 없음), 번들 ID `kr.clo3olb.toolbelt`.
@@ -57,6 +59,7 @@ Sources/Toolbelt/
 │   ├── RecordingPlayer.swift  # 두 트랙을 offset 맞춰 AVAudioPlayer 2개로 동시 재생
 │   ├── RecordingsBrowser.swift # 메인 창 '녹음' 페이지 (HSplitView: 녹음 막대+목록 / 재생·대화·텍스트·복사·휴지통)
 │   └── RecordingTranscriber.swift # SpeechAnalyzer로 트랙별 전사 → 시간순 "나/상대" transcript.txt + transcript-apple.json(구간·단어 시간·신뢰도)
+├── Updater/Updater.swift      # Sparkle 자동 업데이트 (SPUStandardUpdaterController, 설정의 업데이트 카드, '업데이트 확인…' 메뉴)
 ├── LoginItem/LoginItem.swift  # 로그인 시 자동 실행 (SMAppService.mainApp)
 └── SystemStats/SystemStats.swift  # CPU·메모리·저장 공간 측정(host_statistics(64), 볼륨 용량), 활성 상태 보기 열기
 ```
