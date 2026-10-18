@@ -1,0 +1,7 @@
+.build/
+build/
+.DS_Store
+
+# 개인용 지침·메모 (공개 저장소에 올리지 않는다)
+CLAUDE.local.md
+AGENTS.md
