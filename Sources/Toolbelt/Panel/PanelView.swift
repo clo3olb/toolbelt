@@ -56,6 +56,7 @@ struct FeatureSection: View {
     var body: some View {
         switch feature {
         case .recording: RecordingSection(controller: .shared)
+        case .clipboard: ClipboardPanelSection(history: .shared, model: model)
         case .system: SystemPanelSection(model: model)
         case .storage: StoragePanelSection(model: model)
         case .windowSnap: WindowSnapPanelSection(model: model)
@@ -94,6 +95,93 @@ struct PermissionBanner: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.12)))
+    }
+}
+
+// MARK: - 클립보드
+
+struct ClipboardPanelSection: View {
+    @ObservedObject var history: ClipboardHistory
+    @ObservedObject var model: PanelModel
+
+    var body: some View {
+        PanelSection("클립보드") {
+            Button("모든 기록") { model.openMainWindow(.feature(.clipboard)) }
+                .buttonStyle(.link).font(.caption)
+        } content: {
+            VStack(alignment: .leading, spacing: 8) {
+                if !history.isEnabled {
+                    HStack {
+                        Text("복사한 텍스트를 기록합니다").font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("켜기") { history.setEnabled(true) }.controlSize(.small)
+                    }
+                } else {
+                    Toggle(isOn: Binding(get: { !history.isPaused }, set: { history.setPaused(!$0) })) {
+                        Text(history.isPaused ? "기록 일시정지됨" : "기록 중").font(.callout)
+                    }
+                    .toggleStyle(.switch).controlSize(.mini)
+                    if let notice = history.notice {
+                        Text(notice).font(.caption.weight(.medium)).foregroundStyle(.red)
+                    }
+                    if history.items.isEmpty {
+                        Text("아직 기록이 없습니다").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 2) {
+                            ForEach(history.items.prefix(5)) { item in
+                                ClipRow(item: item, history: history, compact: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 기록 한 줄. 누르면 다시 클립보드로 (비밀 항목은 확인 후)
+struct ClipRow: View {
+    let item: ClipItem
+    @ObservedObject var history: ClipboardHistory
+    var compact = false
+    @State private var hovering = false
+
+    private static let time: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.unitsStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: item.isSecret ? "lock.fill" : "doc.on.doc")
+                .font(.system(size: 11)).foregroundStyle(item.isSecret ? Color.orange : Color.secondary).frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.preview).font(item.isSecret ? .callout.monospaced() : .callout).lineLimit(1).truncationMode(.tail)
+                Text([item.label, item.source, Self.time.localizedString(for: item.date, relativeTo: Date())]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if !compact {
+                if item.isSecret {
+                    Button { history.markNormal(item) } label: { Image(systemName: "lock.open") }
+                        .buttonStyle(.borderless).help("일반으로 바꾸기 (Touch ID/암호 확인, 다음부터 비밀로 기억하지 않음)")
+                } else {
+                    Button { history.markSecret(item) } label: { Image(systemName: "lock") }
+                        .buttonStyle(.borderless).help("비밀로 바꾸기 (키체인으로 옮기고 가림, 같은 값은 다음에도 비밀로)")
+                }
+                Button { history.delete(item) } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless).help("삭제")
+            }
+        }
+        .padding(.vertical, 4).padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(hovering ? 0.12 : 0)))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { history.copy(item) }
+        .help(item.isSecret ? "Touch ID 또는 암호 확인 후 복사 (30초 뒤 지움)" : "클릭해서 복사")
     }
 }
 

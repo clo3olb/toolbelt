@@ -24,7 +24,7 @@ macOS 메뉴바 유틸리티 앱 **Toolbelt**. 여러 기능을 계속 추가해
 - 창 배치·브라우저 회의 감지는 **손쉬운 사용**, 녹음은 **마이크**와 **화면 및 시스템 오디오 녹음** 권한이 필요하다. 사용자가 직접 켜야 한다.
 - 자체 서명 인증서 `Toolbelt Signing`은 `security find-identity`에 `CSSMERR_TP_NOT_TRUSTED`로 나오지만 정상이다.
 - 인증서를 다시 만들거나 ad-hoc(`SIGN_ID=-`)으로 빌드하면 권한이 풀린다 → "설정에서 Toolbelt를 지우고 다시 추가" 안내.
-- 다른 사람에게 영향이 큰 기능은 **기본 꺼짐**: Caps Lock 리매핑, 통화 자동 녹음.
+- 다른 사람에게 영향이 큰 기능은 **기본 꺼짐**: Caps Lock 리매핑, 통화 자동 녹음, 클립보드 기록.
 
 ## 구조
 
@@ -46,6 +46,10 @@ Sources/Toolbelt/
 │   ├── WindowMover.swift      # AX API로 포커스 창 이동, 원래대로(restoreFrames), 다음/이전 디스플레이, 옆 모니터 넘기기
 │   ├── WindowSnapSettings.swift  # 종류별 켜기/끄기·단축키 저장(snapEnabled/snapHotKeys), 전역 단축키 재등록(group "windowSnap")
 │   └── SnapViews.swift        # SnapGlyph(영역 아이콘), SnapTile(팝오버), ShortcutField(단축키 기록, 기록 중 단축키 해제)
+├── Clipboard/                 # 클립보드 기록 (텍스트, 200개·7일, 기본 꺼짐)
+│   ├── ClipboardHistory.swift # @MainActor: 0.5초 changeCount 폴링, 비밀 판단(민감 표시·제외 앱·SecretDetector), 복사·비밀로 바꾸기·정리
+│   ├── ClipboardStore.swift   # clipboard.dat(AES-GCM: 항목 + 기억한 비밀 지문), 비밀 값·암호화 키·HMAC 키는 키체인, 꺼낼 때 LAContext 인증
+│   └── SecretDetector.swift   # API 키·토큰·개인 키 형식 + 무작위성(엔트로피) 판정, 가린 미리보기
 ├── Storage/StorageDevices.swift  # 마운트된 로컬 볼륨 용량, 꺼내기
 ├── Display/                   # 디스플레이
 │   ├── DisplayManager.swift   # 연결 해제/재연결(비공개 API), 주 디스플레이 변경, 확인 다이얼로그
@@ -106,6 +110,8 @@ Sources/Toolbelt/
   자동 녹음 제목: "<앱> 통화 녹음 · HH:mm". 직접 시작한 녹음은 통화가 끝나도 멈추지 않는다.
 - **전사**: Apple 기기 내 엔진(SpeechAnalyzer). 원본 오디오와 시간 데이터(`transcript-apple.json`)를 함께 보관해 다른 엔진 결과를
   `transcript-<엔진>.json`으로 나란히 둘 수 있게 한다. Claude API에는 음성 전사 기능이 없다.
+- **클립보드**: 키체인 항목(service `kr.clo3olb.toolbelt`)은 앱 서명에 묶이므로 테스트 바이너리로 같은 service에 쓰지 말 것(다른 service로 시험).
+  Toolbelt가 직접 쓴 클립보드 변경(ownChangeCount)은 기록하지 않는다. 비밀 복사 시 ConcealedType을 붙여 다른 클립보드 앱도 기록하지 않게 한다.
 - **재생**: `RecordingPlayer.updatePosition()`은 `pause()`에서도 부르므로 그 안에서 `pause()`를 부르면 무한 재귀(크래시)가 난다.
 - **창 배치**: 가상 키 입력으로 보낸 단축키에서 크기만 바뀌고 위치가 그대로인 경우가 관찰됐다(실사용에서는 문제없음).
   재발하면 `WindowMover.perform`의 AX 에러 코드를 로그로 남기고 위치→크기→위치 순서로 설정해 볼 것.

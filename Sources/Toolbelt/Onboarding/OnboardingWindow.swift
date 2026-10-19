@@ -93,6 +93,7 @@ private struct OnboardingView: View {
                                       granted: screenGranted) {
                             if !CGRequestScreenCaptureAccess() { recorder.openScreenPermissionSettings() }
                         }
+                        ClipboardPermissionRow(history: .shared)
                     }
 
                     Card(title: "선택 기능 (기본 꺼짐)") {
@@ -124,6 +125,16 @@ private struct OnboardingView: View {
                                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
                             Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Toggle(isOn: Binding(get: { ClipboardHistory.shared.isEnabled },
+                                                     set: { ClipboardHistory.shared.setEnabled($0); tick += 1 })) {
+                                    Text("클립보드 기록").font(.callout.weight(.medium))
+                                }
+                                .toggleStyle(.switch)
+                                Text("복사한 텍스트를 7일 동안 이 Mac에만 암호화해 보관합니다. API 키·비밀번호처럼 보이는 값은 가려서 키체인에 두고, 다시 쓸 때 Touch ID나 암호를 확인합니다.")
+                                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Divider()
                             Toggle(isOn: Binding(get: { model.loginEnabled }, set: model.setLoginEnabled)) {
                                 Text("로그인 시 자동 실행").font(.callout.weight(.medium))
                             }
@@ -146,6 +157,7 @@ private struct OnboardingView: View {
             tick += 1
             model.trusted = AXIsProcessTrusted()
             model.capsShortcutReady = CapsLockSwitch.isShortcutF19
+            ClipboardHistory.shared.refreshAccess()
         }
     }
 }

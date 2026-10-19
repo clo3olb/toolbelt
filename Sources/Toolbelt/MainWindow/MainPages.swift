@@ -67,6 +67,125 @@ struct SystemPage: View {
     }
 }
 
+// MARK: - 클립보드
+
+struct ClipboardPage: View {
+    @ObservedObject var history: ClipboardHistory
+    @State private var search = ""
+    @State private var confirmClear = false
+
+    private var filtered: [ClipItem] {
+        guard !search.isEmpty else { return history.items }
+        return history.items.filter { ($0.text ?? $0.preview).localizedCaseInsensitiveContains(search)
+            || ($0.source ?? "").localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        PageScaffold(title: "클립보드", subtitle: "복사한 텍스트를 최근 \(ClipboardHistory.maxItems)개, 7일 동안 이 Mac에만 암호화해 보관합니다.") {
+            Card(title: "기록") {
+                Toggle("클립보드 기록", isOn: Binding(get: { history.isEnabled }, set: history.setEnabled)).toggleStyle(.switch)
+                if history.isEnabled {
+                    Toggle("일시정지 (이동안 복사한 것은 기록하지 않음)", isOn: Binding(get: { history.isPaused }, set: history.setPaused))
+                        .toggleStyle(.switch)
+                }
+                accessStatus
+                Text("API 키·토큰·개인 키, 비밀번호 관리자에서 복사한 값, 제외 앱에서 복사한 값은 **비밀**로 저장합니다: 값은 키체인에만 두고 기록에는 가려서 보여주며, 다시 복사할 때 Touch ID나 Mac 암호를 확인하고 \(Int(ClipboardHistory.secretClearDelay))초 뒤 클립보드에서 지웁니다.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
+            Card(title: "기록 \(history.items.count)개") {
+                HStack {
+                    TextField("검색", text: $search).textFieldStyle(.roundedBorder)
+                    Button("모두 지우기") { confirmClear = true }.disabled(history.items.isEmpty)
+                        .confirmationDialog("클립보드 기록과 비밀 항목을 모두 지울까요? (비밀로 기억한 값은 남습니다)", isPresented: $confirmClear) {
+                            Button("모두 지우기", role: .destructive, action: history.clearAll)
+                        }
+                }
+                if let notice = history.notice {
+                    Text(notice).font(.caption.weight(.medium)).foregroundStyle(.red)
+                }
+                VStack(spacing: 0) {
+                    ForEach(filtered) { item in
+                        ClipRow(item: item, history: history)
+                        Divider().opacity(0.4)
+                    }
+                }
+                if filtered.isEmpty {
+                    Text(history.items.isEmpty ? "아직 기록이 없습니다" : "검색 결과가 없습니다").foregroundStyle(.secondary)
+                }
+                Text("일반 항목에 비밀번호가 들어갔다면 🔒 버튼으로 비밀로 바꾸세요. 같은 값을 다시 복사하면 처음부터 비밀로 저장합니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("비밀로 기억한 값 \(history.rememberedSecrets.count)개").font(.callout)
+                    Text("(값은 저장하지 않고 되돌릴 수 없는 지문만 보관)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("모두 잊기", action: history.forgetRememberedSecrets).controlSize(.small)
+                        .disabled(history.rememberedSecrets.isEmpty)
+                }
+            }
+
+            Card(title: "비밀로 취급할 앱") {
+                Text("이 앱들에서 복사한 값은 모두 비밀로 저장합니다.").font(.callout).foregroundStyle(.secondary)
+                ForEach(history.excludedApps, id: \.self) { bundleID in
+                    HStack {
+                        Text(appName(bundleID))
+                        Text(isInstalled(bundleID) ? bundleID : "설치 안 됨").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { history.removeExcludedApp(bundleID) } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                Menu("실행 중인 앱 추가") {
+                    ForEach(runningApps, id: \.bundleIdentifier) { app in
+                        Button(app.localizedName ?? app.bundleIdentifier ?? "") {
+                            if let id = app.bundleIdentifier { history.addExcludedApp(id) }
+                        }
+                    }
+                }
+                .fixedSize()
+            }
+        }
+        .onAppear(perform: history.refreshAccess)
+    }
+
+    @ViewBuilder
+    private var accessStatus: some View {
+        let (ok, text): (Bool, String) = switch history.accessBehavior {
+        case .alwaysAllow: (true, "클립보드 접근: 항상 허용")
+        case .alwaysDeny: (false, "클립보드 접근이 거부돼 기록할 수 없습니다. 시스템 설정에서 '항상 허용'으로 바꾸세요.")
+        case .ask: (false, "복사할 때마다 macOS가 허용을 물을 수 있습니다. 시스템 설정에서 '항상 허용'으로 바꾸세요.")
+        default: (false, "처음 기록할 때 macOS가 클립보드 접근 허용을 묻습니다. '허용'을 눌러 주세요.")
+        }
+        HStack(spacing: 6) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundStyle(ok ? .green : .orange)
+            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            if !ok {
+                Button(history.accessBehavior == .default ? "허용하기" : "설정 열기", action: history.requestAccess)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var runningApps: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil
+                && !history.excludedApps.contains($0.bundleIdentifier!) }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+    }
+
+    private func isInstalled(_ bundleID: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
+    }
+
+    private func appName(_ bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return ClipboardHistory.knownAppNames[bundleID] ?? bundleID
+        }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+}
+
 // MARK: - 저장 장치
 
 struct StoragePage: View {
@@ -276,6 +395,7 @@ struct SettingsPage: View {
                 }
                 PermissionRow(title: "화면 및 시스템 오디오 녹음", detail: "컴퓨터 소리 녹음",
                               granted: CGPreflightScreenCaptureAccess(), action: recorder.openScreenPermissionSettings)
+                ClipboardPermissionRow(history: .shared)
             }
         }
     }
@@ -298,6 +418,17 @@ private struct UpdateCard: View {
             Link("릴리스 노트 보기", destination: URL(string: "https://github.com/clo3olb/toolbelt/releases")!)
                 .font(.callout)
         }
+    }
+}
+
+/// 클립보드 접근 (macOS 26): "항상 허용"이어야 기록이 매번 묻지 않고 동작한다
+struct ClipboardPermissionRow: View {
+    @ObservedObject var history: ClipboardHistory
+
+    var body: some View {
+        PermissionRow(title: "클립보드 접근", detail: "클립보드 기록 — 시스템 설정에서 '항상 허용'",
+                      granted: history.accessGranted, action: history.requestAccess)
+            .onAppear(perform: history.refreshAccess)
     }
 }
 
