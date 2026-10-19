@@ -170,7 +170,7 @@ struct ClipRow: View {
                         .buttonStyle(.borderless).help("일반으로 바꾸기 (Touch ID/암호 확인, 다음부터 비밀로 기억하지 않음)")
                 } else {
                     Button { history.markSecret(item) } label: { Image(systemName: "lock") }
-                        .buttonStyle(.borderless).help("비밀로 바꾸기 (키체인으로 옮기고 가림, 같은 값은 다음에도 비밀로)")
+                        .buttonStyle(.borderless).help("비밀로 바꾸기 (보안 칩 키로 암호화해 가림, 같은 값은 다음에도 비밀로)")
                 }
                 Button { history.delete(item) } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless).help("삭제")
@@ -199,9 +199,41 @@ struct SystemPanelSection: View {
                 RingGauge(title: "CPU", usage: model.cpu, tint: .blue)
                 RingGauge(title: "메모리", usage: model.memory, tint: .green)
                 RingGauge(title: "저장 공간", usage: model.storage, tint: .purple)
+                ThermometerGauge(model: model)
             }
             .padding(.vertical, 4)
         }
+    }
+}
+
+enum Thermal {
+    static func color(_ celsius: Double?) -> Color {
+        guard let c = celsius else { return .secondary }
+        return c >= 85 ? .red : c >= 70 ? .orange : .primary
+    }
+
+    static func stateName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "보통"
+        case .fair: return "약간 높음"
+        case .serious: return "높음"
+        case .critical: return "위험"
+        @unknown default: return "알 수 없음"
+        }
+    }
+
+    static func stateColor(_ state: ProcessInfo.ThermalState) -> Color {
+        switch state {
+        case .nominal: return .secondary
+        case .fair: return .orange
+        default: return .red
+        }
+    }
+
+    static func rpm(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return "\(f.string(from: NSNumber(value: Int(value.rounded()))) ?? "\(Int(value))") RPM"
     }
 }
 
@@ -573,6 +605,73 @@ struct RingGauge: View {
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// 온도계 모양 게이지: 세로 유리관 + 구슬, 20~100°C 범위로 차오른다. 아래 줄은 팬 속도(발열 상태가 보통이 아니면 그걸 표시).
+struct ThermometerGauge: View {
+    @ObservedObject var model: PanelModel
+
+    private static let range: ClosedRange<Double> = 20...100
+
+    private var ratio: Double {
+        guard let t = model.cpuTemperature else { return 0 }
+        return min(max((t - Self.range.lowerBound) / (Self.range.upperBound - Self.range.lowerBound), 0), 1)
+    }
+
+    private var color: Color {
+        guard let t = model.cpuTemperature else { return .secondary }   // 못 읽으면 회색
+        return t >= 85 ? .red : t >= 70 ? .orange : .teal
+    }
+
+    private var detail: String {
+        if model.thermalState != .nominal { return "발열 \(Thermal.stateName(model.thermalState))" }
+        if let fan = model.fans.map(\.current).max() { return "팬 \(Thermal.rpm(fan))" }
+        return model.cpuTemperature == nil ? "정보 없음" : "CPU 코어"
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .center, spacing: 6) {
+                thermometer.frame(width: 22, height: 62)
+                Text(model.cpuTemperature.map { "\(Int($0.rounded()))°" } ?? "–")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(model.cpuTemperature == nil ? Color.secondary : Color.primary)
+            }
+            .frame(height: 62)
+            Text("온도").font(.caption.weight(.medium))
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(model.thermalState == .nominal ? Color.secondary : Thermal.stateColor(model.thermalState))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 관(위)과 구슬(아래). 구슬은 항상 차 있고, 관은 비율만큼 아래에서 위로 찬다.
+    private var thermometer: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            let bulb = w, tubeW = w * 0.5
+            let tubeH = h - bulb * 0.75
+            ZStack(alignment: .bottom) {
+                // 유리관 배경
+                Capsule().fill(color.opacity(0.15))
+                    .frame(width: tubeW, height: tubeH)
+                    .position(x: w / 2, y: tubeH / 2)
+                // 차오른 부분 (구슬과 이어지도록 아래로 조금 겹친다)
+                Capsule().fill(color)
+                    .frame(width: tubeW * 0.6, height: max((tubeH - tubeW * 0.3) * ratio + bulb * 0.3, bulb * 0.3))
+                    .position(x: w / 2, y: tubeH - max((tubeH - tubeW * 0.3) * ratio + bulb * 0.3, bulb * 0.3) / 2 + bulb * 0.15)
+                    .animation(.easeOut(duration: 0.5), value: ratio)
+                // 구슬
+                Circle().fill(color.opacity(0.15)).frame(width: bulb, height: bulb)
+                    .position(x: w / 2, y: h - bulb / 2)
+                Circle().fill(color).frame(width: bulb * 0.7, height: bulb * 0.7)
+                    .position(x: w / 2, y: h - bulb / 2)
+            }
+        }
     }
 }
 

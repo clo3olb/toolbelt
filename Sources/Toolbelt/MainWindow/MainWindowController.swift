@@ -85,7 +85,7 @@ private struct MainWindowView: View {
             case .feature(.recording):
                 RecordingsBrowser(controller: .shared, state: state.recordings)
             case .feature(.clipboard):
-                ClipboardPage(history: .shared)
+                ClipboardBrowser(history: .shared)
             case .feature(.system):
                 SystemPage(model: state.model)
             case .feature(.storage):

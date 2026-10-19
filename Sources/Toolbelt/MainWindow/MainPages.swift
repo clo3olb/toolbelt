@@ -51,8 +51,38 @@ struct SystemPage: View {
                     RingGauge(title: "CPU", usage: model.cpu, tint: .blue)
                     RingGauge(title: "메모리", usage: model.memory, tint: .green)
                     RingGauge(title: "저장 공간", usage: model.storage, tint: .purple)
+                    ThermometerGauge(model: model)
                 }
                 .padding(.vertical, 6)
+            }
+            Card(title: "온도·팬") {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.cpuTemperature.map { "\(Int($0.rounded()))°C" } ?? "–")
+                            .font(.system(size: 34, weight: .semibold, design: .rounded)).monospacedDigit()
+                            .foregroundStyle(Thermal.color(model.cpuTemperature))
+                        Text("CPU 코어 온도").font(.caption).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Thermal.stateName(model.thermalState)).font(.title3.weight(.semibold))
+                            .foregroundStyle(model.thermalState == .nominal ? Color.primary : Thermal.stateColor(model.thermalState))
+                        Text("발열 상태 (macOS)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                ForEach(Array(model.fans.enumerated()), id: \.offset) { index, fan in
+                    HStack(spacing: 10) {
+                        Text("팬 \(index + 1)").frame(width: 40, alignment: .leading)
+                        UsageBar(ratio: fan.max > fan.min ? (fan.current - fan.min) / (fan.max - fan.min) : 0, tint: .teal)
+                        Text(Thermal.rpm(fan.current)).monospacedDigit().frame(width: 90, alignment: .trailing)
+                    }
+                    .font(.callout)
+                }
+                if !model.fans.isEmpty, let fan = model.fans.first {
+                    Text("막대는 최소 \(Thermal.rpm(fan.min)) ~ 최대 \(Thermal.rpm(fan.max)) 범위").font(.caption).foregroundStyle(.secondary)
+                }
+                Text("CPU 온도는 SMC 코어 센서들의 중앙값입니다. 70°C 이상 주황, 85°C 이상 빨강. Apple Silicon은 온도 공개 API가 없어 비공개 경로로 읽으므로 macOS 업데이트 후 '–'로 보일 수 있습니다.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Card(title: "기준") {
                 VStack(alignment: .leading, spacing: 6) {
@@ -64,125 +94,6 @@ struct SystemPage: View {
             }
             Button("활성 상태 보기 열기", systemImage: "chart.bar.xaxis", action: model.openActivityMonitor)
         }
-    }
-}
-
-// MARK: - 클립보드
-
-struct ClipboardPage: View {
-    @ObservedObject var history: ClipboardHistory
-    @State private var search = ""
-    @State private var confirmClear = false
-
-    private var filtered: [ClipItem] {
-        guard !search.isEmpty else { return history.items }
-        return history.items.filter { ($0.text ?? $0.preview).localizedCaseInsensitiveContains(search)
-            || ($0.source ?? "").localizedCaseInsensitiveContains(search) }
-    }
-
-    var body: some View {
-        PageScaffold(title: "클립보드", subtitle: "복사한 텍스트를 최근 \(ClipboardHistory.maxItems)개, 7일 동안 이 Mac에만 암호화해 보관합니다.") {
-            Card(title: "기록") {
-                Toggle("클립보드 기록", isOn: Binding(get: { history.isEnabled }, set: history.setEnabled)).toggleStyle(.switch)
-                if history.isEnabled {
-                    Toggle("일시정지 (이동안 복사한 것은 기록하지 않음)", isOn: Binding(get: { history.isPaused }, set: history.setPaused))
-                        .toggleStyle(.switch)
-                }
-                accessStatus
-                Text("API 키·토큰·개인 키, 비밀번호 관리자에서 복사한 값, 제외 앱에서 복사한 값은 **비밀**로 저장합니다: 값은 키체인에만 두고 기록에는 가려서 보여주며, 다시 복사할 때 Touch ID나 Mac 암호를 확인하고 \(Int(ClipboardHistory.secretClearDelay))초 뒤 클립보드에서 지웁니다.")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-
-            Card(title: "기록 \(history.items.count)개") {
-                HStack {
-                    TextField("검색", text: $search).textFieldStyle(.roundedBorder)
-                    Button("모두 지우기") { confirmClear = true }.disabled(history.items.isEmpty)
-                        .confirmationDialog("클립보드 기록과 비밀 항목을 모두 지울까요? (비밀로 기억한 값은 남습니다)", isPresented: $confirmClear) {
-                            Button("모두 지우기", role: .destructive, action: history.clearAll)
-                        }
-                }
-                if let notice = history.notice {
-                    Text(notice).font(.caption.weight(.medium)).foregroundStyle(.red)
-                }
-                VStack(spacing: 0) {
-                    ForEach(filtered) { item in
-                        ClipRow(item: item, history: history)
-                        Divider().opacity(0.4)
-                    }
-                }
-                if filtered.isEmpty {
-                    Text(history.items.isEmpty ? "아직 기록이 없습니다" : "검색 결과가 없습니다").foregroundStyle(.secondary)
-                }
-                Text("일반 항목에 비밀번호가 들어갔다면 🔒 버튼으로 비밀로 바꾸세요. 같은 값을 다시 복사하면 처음부터 비밀로 저장합니다.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Text("비밀로 기억한 값 \(history.rememberedSecrets.count)개").font(.callout)
-                    Text("(값은 저장하지 않고 되돌릴 수 없는 지문만 보관)").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("모두 잊기", action: history.forgetRememberedSecrets).controlSize(.small)
-                        .disabled(history.rememberedSecrets.isEmpty)
-                }
-            }
-
-            Card(title: "비밀로 취급할 앱") {
-                Text("이 앱들에서 복사한 값은 모두 비밀로 저장합니다.").font(.callout).foregroundStyle(.secondary)
-                ForEach(history.excludedApps, id: \.self) { bundleID in
-                    HStack {
-                        Text(appName(bundleID))
-                        Text(isInstalled(bundleID) ? bundleID : "설치 안 됨").font(.caption.monospaced()).foregroundStyle(.secondary)
-                        Spacer()
-                        Button { history.removeExcludedApp(bundleID) } label: { Image(systemName: "minus.circle") }
-                            .buttonStyle(.borderless)
-                    }
-                }
-                Menu("실행 중인 앱 추가") {
-                    ForEach(runningApps, id: \.bundleIdentifier) { app in
-                        Button(app.localizedName ?? app.bundleIdentifier ?? "") {
-                            if let id = app.bundleIdentifier { history.addExcludedApp(id) }
-                        }
-                    }
-                }
-                .fixedSize()
-            }
-        }
-        .onAppear(perform: history.refreshAccess)
-    }
-
-    @ViewBuilder
-    private var accessStatus: some View {
-        let (ok, text): (Bool, String) = switch history.accessBehavior {
-        case .alwaysAllow: (true, "클립보드 접근: 항상 허용")
-        case .alwaysDeny: (false, "클립보드 접근이 거부돼 기록할 수 없습니다. 시스템 설정에서 '항상 허용'으로 바꾸세요.")
-        case .ask: (false, "복사할 때마다 macOS가 허용을 물을 수 있습니다. 시스템 설정에서 '항상 허용'으로 바꾸세요.")
-        default: (false, "처음 기록할 때 macOS가 클립보드 접근 허용을 묻습니다. '허용'을 눌러 주세요.")
-        }
-        HStack(spacing: 6) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundStyle(ok ? .green : .orange)
-            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            if !ok {
-                Button(history.accessBehavior == .default ? "허용하기" : "설정 열기", action: history.requestAccess)
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    private var runningApps: [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil
-                && !history.excludedApps.contains($0.bundleIdentifier!) }
-            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
-    }
-
-    private func isInstalled(_ bundleID: String) -> Bool {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
-    }
-
-    private func appName(_ bundleID: String) -> String {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return ClipboardHistory.knownAppNames[bundleID] ?? bundleID
-        }
-        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 }
 
@@ -374,6 +285,7 @@ struct SettingsPage: View {
             Card(title: "녹음") {
                 Toggle("통화 자동 녹음", isOn: Binding(get: { recorder.autoRecordCalls }, set: recorder.setAutoRecordCalls))
                     .toggleStyle(.switch)
+                MeetingKeywordsEditor(recorder: recorder)
                 HStack {
                     Text(RecordingStore.root.path).font(.caption.monospaced()).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
@@ -418,6 +330,60 @@ private struct UpdateCard: View {
             Link("릴리스 노트 보기", destination: URL(string: "https://github.com/clo3olb/toolbelt/releases")!)
                 .font(.callout)
         }
+    }
+}
+
+/// 회의 사이트 단어: 브라우저 창 제목에 이 단어가 있고 브라우저가 마이크를 쓰면 통화로 보고 자동 녹음한다.
+private struct MeetingKeywordsEditor: View {
+    @ObservedObject var recorder: RecordingController
+    @State private var draft = ""
+    @State private var liveBrowsers: [(browser: String, titles: [String])] = []
+    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("회의 사이트 단어").font(.callout.weight(.medium))
+            Text("브라우저(Chrome·Arc·Safari·Edge·Whale)에서 통화할 때, 창 제목에 아래 단어가 있으면 자동 녹음합니다. Meet·Zoom·Teams·Webex 등은 기본으로 포함돼 있습니다.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                ForEach(recorder.customKeywords, id: \.self) { word in
+                    HStack(spacing: 4) {
+                        Text(word).font(.callout)
+                        Button { recorder.removeCustomKeyword(word) } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                }
+                TextField("단어 추가", text: $draft).textFieldStyle(.roundedBorder).frame(width: 140)
+                    .onSubmit { recorder.addCustomKeyword(draft); draft = "" }
+                Button("추가") { recorder.addCustomKeyword(draft); draft = "" }.controlSize(.small)
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            // 지금 브라우저로 통화 중이면 창 제목을 보여줘 어떤 단어를 넣을지 알 수 있게 한다
+            if !liveBrowsers.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(liveBrowsers, id: \.browser) { entry in
+                        Text("지금 마이크를 쓰는 브라우저: \(entry.browser)").font(.caption.weight(.medium))
+                        ForEach(entry.titles, id: \.self) { title in
+                            Text("• \(title)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                        if entry.titles.isEmpty {
+                            Text("창 제목을 읽지 못했습니다 (손쉬운 사용 권한 확인)").font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            }
+        }
+        .onAppear(perform: refresh)
+        .onReceive(timer) { _ in refresh() }
+    }
+
+    private func refresh() {
+        liveBrowsers = CallApps.browsersUsingMicrophone()
     }
 }
 

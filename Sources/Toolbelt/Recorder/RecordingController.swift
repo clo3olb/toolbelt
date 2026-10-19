@@ -61,6 +61,21 @@ final class RecordingController: ObservableObject {
 
     // MARK: - 통화 자동 녹음
 
+    /// 회의 사이트 단어 (브라우저 창 제목에 있으면 통화로 본다)
+    @Published private(set) var customKeywords: [String] = CallApps.customKeywords
+
+    func addCustomKeyword(_ word: String) {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !customKeywords.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+        customKeywords.append(trimmed)
+        UserDefaults.standard.set(customKeywords, forKey: CallApps.customKeywordsKey)
+    }
+
+    func removeCustomKeyword(_ word: String) {
+        customKeywords.removeAll { $0 == word }
+        UserDefaults.standard.set(customKeywords, forKey: CallApps.customKeywordsKey)
+    }
+
     func setAutoRecordCalls(_ on: Bool) {
         autoRecordCalls = on
         UserDefaults.standard.set(on, forKey: "autoRecordCalls")

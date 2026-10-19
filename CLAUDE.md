@@ -48,7 +48,8 @@ Sources/Toolbelt/
 │   └── SnapViews.swift        # SnapGlyph(영역 아이콘), SnapTile(팝오버), ShortcutField(단축키 기록, 기록 중 단축키 해제)
 ├── Clipboard/                 # 클립보드 기록 (텍스트, 200개·7일, 기본 꺼짐)
 │   ├── ClipboardHistory.swift # @MainActor: 0.5초 changeCount 폴링, 비밀 판단(민감 표시·제외 앱·SecretDetector), 복사·비밀로 바꾸기·정리
-│   ├── ClipboardStore.swift   # clipboard.dat(AES-GCM: 항목 + 기억한 비밀 지문), 비밀 값·암호화 키·HMAC 키는 키체인, 꺼낼 때 LAContext 인증
+│   ├── ClipboardBrowser.swift # 메인 창 '클립보드' 페이지 (HSplitView: 목록 / 상세·인증 후 보기, ⚙︎ 설정 시트)
+│   ├── ClipboardStore.swift   # 보안 칩(Secure Enclave) 키 2개(clipboard-keys.json): 인증 없는 키→기록·지문 키, userPresence 키→비밀 복호화. clipboard-v2.dat(AES-GCM)
 │   └── SecretDetector.swift   # API 키·토큰·개인 키 형식 + 무작위성(엔트로피) 판정, 가린 미리보기
 ├── Storage/StorageDevices.swift  # 마운트된 로컬 볼륨 용량, 꺼내기
 ├── Display/                   # 디스플레이
@@ -65,7 +66,9 @@ Sources/Toolbelt/
 │   └── RecordingTranscriber.swift # SpeechAnalyzer로 트랙별 전사 → 시간순 "나/상대" transcript.txt + transcript-apple.json(구간·단어 시간·신뢰도)
 ├── Updater/Updater.swift      # Sparkle 자동 업데이트 (SPUStandardUpdaterController, 설정의 업데이트 카드, '업데이트 확인…' 메뉴)
 ├── LoginItem/LoginItem.swift  # 로그인 시 자동 실행 (SMAppService.mainApp)
-└── SystemStats/SystemStats.swift  # CPU·메모리·저장 공간 측정(host_statistics(64), 볼륨 용량), 활성 상태 보기 열기
+└── SystemStats/
+    ├── SystemStats.swift      # CPU·메모리·저장 공간 측정(host_statistics(64), 볼륨 용량), 활성 상태 보기 열기
+    └── SMC.swift              # AppleSMC(비공개)로 CPU 온도(코어 센서 중앙값)·팬 속도, 첫 호출 때 키 탐색(~0.3초, 백그라운드)
 ```
 
 ### 새 기능 추가 규칙
@@ -107,11 +110,21 @@ Sources/Toolbelt/
   카카오톡은 통화 종료 즉시 마이크를 놓는다. 우리 녹음 중에는 `com.apple.replayd`(ScreenCaptureKit)가 마이크 사용자로 보인다(대상 아님).
   Chrome·Slack은 `.helper` 프로세스, Safari는 `com.apple.WebKit.GPU`가 마이크를 쓴다. 전화·FaceTime은 시스템 데몬일 수 있어 실제 번들 ID를
   로그("마이크 사용 중인 프로세스")로 확인해 `CallApps`를 보정한다. 브라우저는 창 제목에 회의 서비스 이름이 있을 때만. AI 음성 대화 앱은 대상이 아니다.
+  사용자 회의 사이트 단어는 UserDefaults `callCustomKeywords` (기본 단어보다 먼저 본다, 제목에는 그 단어가 앱 이름으로 쓰임).
   자동 녹음 제목: "<앱> 통화 녹음 · HH:mm". 직접 시작한 녹음은 통화가 끝나도 멈추지 않는다.
 - **전사**: Apple 기기 내 엔진(SpeechAnalyzer). 원본 오디오와 시간 데이터(`transcript-apple.json`)를 함께 보관해 다른 엔진 결과를
   `transcript-<엔진>.json`으로 나란히 둘 수 있게 한다. Claude API에는 음성 전사 기능이 없다.
-- **클립보드**: 키체인 항목(service `kr.clo3olb.toolbelt`)은 앱 서명에 묶이므로 테스트 바이너리로 같은 service에 쓰지 말 것(다른 service로 시험).
-  Toolbelt가 직접 쓴 클립보드 변경(ownChangeCount)은 기록하지 않는다. 비밀 복사 시 ConcealedType을 붙여 다른 클립보드 앱도 기록하지 않게 한다.
+- **클립보드 저장에 키체인을 쓰지 않는다**: 팀 ID 없는 자체 서명 앱의 키체인 항목은 partition_id가 `cdhash:…`(빌드별)라,
+  다시 빌드·자동 업데이트할 때마다 **로그인 암호 창**이 뜬다(2026-10-19 실제로 발생, 복사마다 창이 반복). → CryptoKit 보안 칩 키로 대체.
+  보안 칩 키는 서명과 무관하며 다시 빌드한 바이너리로 창 없이 읽히는 것을 시험으로 확인. 예전 clipboard.dat과 키체인 항목('Toolbelt 클립보드')은 버린다.
+  렌더링·테스트 바이너리는 실제 Application Support/Toolbelt 폴더를 쓰지 않게 복사본의 폴더 이름을 바꿔서 쓴다.
+  Toolbelt가 직접 쓴 클립보드 변경(ownChangeCount)은 기록하지 않는다.
+  macOS 26 클립보드 접근이 '묻기'면 **읽을 때마다** 허용 창이 뜬다 → 자동 기록은 '항상 허용'일 때만 읽고, '묻지 않음'이면 처음 한 번만 읽는다
+  (클립보드 접근이 '묻기'면 매 복사마다 창이 뜰 수 있다).
+  (명령줄 시험 바이너리는 같은 인증서면 키체인을 읽었지만, 실제 앱 항목은 cdhash 파티션 때문에 창이 떴다 — 시험 결과를 일반화하지 말 것). 비밀 복사 시 ConcealedType을 붙여 다른 클립보드 앱도 기록하지 않게 한다.
+- **온도**: HID 온도 센서(IOHIDServiceClientCopyEvent)는 macOS 26에서 값이 오지 않아 SMC를 쓴다.
+  M4 Max에는 `Tp…` 키가 100개 가까이 있지만 40.0 고정값·보정값이라 쓰면 안 된다 → `Tf0…` 키가 있으면 `Te0…`+`Tf0…`만 사용.
+  `Tf06`은 81.7°C 고정이라 평균 대신 중앙값을 쓴다. 부하 시험으로 `Te0…`·`Tf04/08/09`가 오르는 것을 확인했다.
 - **재생**: `RecordingPlayer.updatePosition()`은 `pause()`에서도 부르므로 그 안에서 `pause()`를 부르면 무한 재귀(크래시)가 난다.
 - **창 배치**: 가상 키 입력으로 보낸 단축키에서 크기만 바뀌고 위치가 그대로인 경우가 관찰됐다(실사용에서는 문제없음).
   재발하면 `WindowMover.perform`의 AX 에러 코드를 로그로 남기고 위치→크기→위치 순서로 설정해 볼 것.

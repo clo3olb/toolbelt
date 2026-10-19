@@ -131,7 +131,7 @@ private struct OnboardingView: View {
                                     Text("클립보드 기록").font(.callout.weight(.medium))
                                 }
                                 .toggleStyle(.switch)
-                                Text("복사한 텍스트를 7일 동안 이 Mac에만 암호화해 보관합니다. API 키·비밀번호처럼 보이는 값은 가려서 키체인에 두고, 다시 쓸 때 Touch ID나 암호를 확인합니다.")
+                                Text("복사한 텍스트를 7일 동안 이 Mac에만 암호화해 보관합니다. API 키·비밀번호처럼 보이는 값은 가려서 보안 칩 키로 암호화해 두고, 다시 쓸 때 Touch ID나 암호를 확인합니다.")
                                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
                             Divider()

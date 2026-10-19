@@ -84,7 +84,7 @@ final class CallDetector {
     }
 
     /// 마이크 입력을 쓰고 있는 프로세스들의 번들 ID (Toolbelt 자신 제외)
-    static func processesUsingMicrophone() -> [String] {
+    nonisolated static func processesUsingMicrophone() -> [String] {
         let system = AudioObjectID(kAudioObjectSystemObject)
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
                                                  mScope: kAudioObjectPropertyScopeGlobal,
@@ -104,7 +104,7 @@ final class CallDetector {
         .sorted()
     }
 
-    private static func property<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ fallback: T) -> T {
+    nonisolated private static func property<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ fallback: T) -> T {
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
                                                  mElement: kAudioObjectPropertyElementMain)
         var value = fallback
@@ -135,13 +135,13 @@ enum CallApps {
 
     /// 브라우저: 마이크를 쓰는 프로세스 → 창 제목을 읽을 앱. 창 제목에 회의 서비스 이름이 있을 때만 통화로 본다.
     /// Safari 계열은 WebKit GPU 프로세스가 마이크를 쓴다.
-    private static let browsers: [(processPrefix: String, appBundleID: String)] = [
-        ("com.google.Chrome", "com.google.Chrome"),
-        ("company.thebrowser", "company.thebrowser.Browser"),
-        ("com.apple.Safari", "com.apple.Safari"),
-        ("com.apple.WebKit.GPU", "com.apple.Safari"),
-        ("com.microsoft.edgemac", "com.microsoft.edgemac"),
-        ("com.naver.Whale", "com.naver.Whale"),
+    private static let browsers: [(processPrefix: String, appBundleID: String, name: String)] = [
+        ("com.google.Chrome", "com.google.Chrome", "Chrome"),
+        ("company.thebrowser", "company.thebrowser.Browser", "Arc"),
+        ("com.apple.Safari", "com.apple.Safari", "Safari"),
+        ("com.apple.WebKit.GPU", "com.apple.Safari", "Safari"),
+        ("com.microsoft.edgemac", "com.microsoft.edgemac", "Edge"),
+        ("com.naver.Whale", "com.naver.Whale", "Whale"),
     ]
 
     /// 창 제목 키워드 → 제목에 쓸 서비스 이름 (앞에서부터 먼저 맞는 것)
@@ -151,6 +151,12 @@ enum CallApps {
         ("Webex", "Webex"), ("Whereby", "Whereby"), ("Jitsi", "Jitsi"), ("Discord", "Discord"),
         ("Slack", "Slack"), ("Gather", "Gather"),
     ]
+
+    /// 사용자가 설정에서 추가한 회의 사이트 단어 (창 제목에 이 단어가 있으면 통화로 본다, 대소문자 무시)
+    static let customKeywordsKey = "callCustomKeywords"
+    static var customKeywords: [String] {
+        UserDefaults.standard.stringArray(forKey: customKeywordsKey) ?? []
+    }
 
     static func match(processBundleID id: String) -> CallDetector.Call? {
         let lower = id.lowercased()
@@ -165,22 +171,41 @@ enum CallApps {
         return nil
     }
 
-    /// 손쉬운 사용 권한으로 브라우저 창 제목(현재 탭 제목)을 읽어 회의 서비스를 찾는다.
+    /// 손쉬운 사용 권한으로 브라우저 창 제목(현재 탭 제목)을 읽어 회의 서비스를 찾는다. 사용자 단어를 먼저 본다.
     private static func meetingInWindowTitles(of bundleID: String) -> String? {
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
-            let element = AXUIElementCreateApplication(app.processIdentifier)
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
-                  let windows = value as? [AXUIElement] else { continue }
-            for window in windows {
-                var title: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title) == .success,
-                      let title = title as? String else { continue }
-                if let hit = meetingKeywords.first(where: { title.localizedCaseInsensitiveContains($0.keyword) }) {
-                    return hit.name
-                }
+        let custom = customKeywords
+        for title in windowTitles(of: bundleID) {
+            if let hit = custom.first(where: { title.localizedCaseInsensitiveContains($0) }) { return hit }
+            if let hit = meetingKeywords.first(where: { title.localizedCaseInsensitiveContains($0.keyword) }) {
+                return hit.name
             }
         }
         return nil
+    }
+
+    static func windowTitles(of bundleID: String) -> [String] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).flatMap { app -> [String] in
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
+                  let windows = value as? [AXUIElement] else { return [] }
+            return windows.compactMap { window in
+                var title: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title) == .success,
+                      let title = title as? String, !title.isEmpty else { return nil }
+                return title
+            }
+        }
+    }
+
+    /// 지금 마이크를 쓰는 브라우저와 그 창 제목들 (설정에서 어떤 단어를 넣을지 보여주기 위함)
+    static func browsersUsingMicrophone() -> [(browser: String, titles: [String])] {
+        let users = CallDetector.processesUsingMicrophone().map { $0.lowercased() }
+        var seen = Set<String>()
+        return browsers.compactMap { browser in
+            guard users.contains(where: { $0.hasPrefix(browser.processPrefix.lowercased()) }),
+                  seen.insert(browser.appBundleID).inserted else { return nil }
+            return (browser.name, windowTitles(of: browser.appBundleID))
+        }
     }
 }

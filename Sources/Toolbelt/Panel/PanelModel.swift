@@ -20,6 +20,10 @@ final class PanelModel: ObservableObject {
     @Published var capsLockSwitch = false
     @Published var capsShortcutReady = false
     @Published var volumes: [StorageVolume] = []
+    /// CPU 온도(°C), 팬, 발열 상태 — 온도·팬은 SMC(비공개)라 못 읽으면 nil/빈 배열
+    @Published var cpuTemperature: Double?
+    @Published var fans: [SMC.Fan] = []
+    @Published var thermalState: ProcessInfo.ThermalState = .nominal
 
     /// PanelController가 채운다: 팝오버 닫기 / 팝오버를 열기 전 앞에 있던 앱으로 돌아가 실행
     var dismiss: () -> Void = {}
@@ -71,7 +75,21 @@ final class PanelModel: ObservableObject {
         timer = nil
     }
 
+    /// SMC는 처음에 센서 키를 찾느라 잠깐 걸리므로 백그라운드에서 읽는다
+    private func refreshThermals() {
+        thermalState = ProcessInfo.processInfo.thermalState
+        DispatchQueue.global(qos: .utility).async {
+            let temperature = SMC.shared.cpuTemperature()
+            let fans = SMC.shared.fans()
+            DispatchQueue.main.async { [weak self] in
+                self?.cpuTemperature = temperature
+                self?.fans = fans
+            }
+        }
+    }
+
     private func refreshStats(cpu measure: Bool) {
+        refreshThermals()
         if measure, let ratio = SystemStats.cpuUsage() {
             cpu = Usage(ratio: ratio, detail: "전체 코어")
         } else if !measure {
