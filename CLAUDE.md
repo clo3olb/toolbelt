@@ -24,7 +24,7 @@ macOS 메뉴바 유틸리티 앱 **Toolbelt**. 여러 기능을 계속 추가해
 - 창 배치·브라우저 회의 감지는 **손쉬운 사용**, 녹음은 **마이크**와 **화면 및 시스템 오디오 녹음** 권한이 필요하다. 사용자가 직접 켜야 한다.
 - 자체 서명 인증서 `Toolbelt Signing`은 `security find-identity`에 `CSSMERR_TP_NOT_TRUSTED`로 나오지만 정상이다.
 - 인증서를 다시 만들거나 ad-hoc(`SIGN_ID=-`)으로 빌드하면 권한이 풀린다 → "설정에서 Toolbelt를 지우고 다시 추가" 안내.
-- 다른 사람에게 영향이 큰 기능은 **기본 꺼짐**: Caps Lock 리매핑, 통화 자동 녹음, 클립보드 기록.
+- 다른 사람에게 영향이 큰 기능은 **기본 꺼짐**: Caps Lock 리매핑, 통화 자동 녹음, 클립보드 기록, 사이트 차단.
 
 ## 구조
 
@@ -51,6 +51,9 @@ Sources/Toolbelt/
 │   ├── ClipboardBrowser.swift # 메인 창 '클립보드' 페이지 (HSplitView: 목록 / 상세·인증 후 보기, ⚙︎ 설정 시트)
 │   ├── ClipboardStore.swift   # 보안 칩(Secure Enclave) 키 2개(clipboard-keys.json): 인증 없는 키→기록·지문 키, userPresence 키→비밀 복호화. clipboard-v2.dat(AES-GCM)
 │   └── SecretDetector.swift   # API 키·토큰·개인 키 형식 + 무작위성(엔트로피) 판정, 가린 미리보기
+├── SiteBlock/                 # 사이트 차단 (기본 꺼짐)
+│   ├── SiteBlocker.swift      # 도메인·모드(끔/항상/시간표)·시간표, 도우미 설치(관리자 암호, osascript) → blocked-domains.txt → LaunchDaemon이 /etc/hosts 구역 갱신
+│   └── SiteBlockViews.swift   # 팝오버 섹션, 메인 창 페이지(사이트 목록·시간표)
 ├── Storage/StorageDevices.swift  # 마운트된 로컬 볼륨 용량, 꺼내기
 ├── Display/                   # 디스플레이
 │   ├── DisplayManager.swift   # 연결 해제/재연결(비공개 API), 주 디스플레이 변경, 확인 다이얼로그
@@ -58,7 +61,8 @@ Sources/Toolbelt/
 ├── InputSwitch/CapsLockSwitch.swift  # Caps Lock→F19 리매핑 (macOS '이전 입력 소스 선택' 단축키를 F19로)
 ├── Recorder/                  # 녹음·전사
 │   ├── CallDetector.swift     # 통화 감지: Core Audio 프로세스별 마이크 사용(2초 폴링) + CallApps 대상 목록, 브라우저는 AX 창 제목
-│   ├── AudioRecorder.swift    # SCStream(.microphone / .audio)을 mic.m4a / system.m4a로 따로 기록, 트랙 시작 offset 계산
+│   ├── AudioRecorder.swift    # SCStream(.microphone)→mic.m4a, 컴퓨터 소리→system.m4a (탭 실패 시 SCStream .audio), 트랙 시작 offset 계산
+│   ├── SystemAudioTap.swift   # Core Audio 프로세스 탭(전역, Toolbelt 제외) + 비공개 집합 장치 → system.m4a
 │   ├── RecordingStore.swift   # ~/Library/Application Support/Toolbelt/Recordings/<날짜>/, meta.json(길이·offset·제목, 녹음 시작 시 생성)
 │   ├── RecordingController.swift  # @MainActor 싱글턴: 녹음 상태·권한, 자동 전사 대기열(하나씩, 실패는 수동 재시도), 통화 감지 연결
 │   ├── RecordingPlayer.swift  # 두 트랙을 offset 맞춰 AVAudioPlayer 2개로 동시 재생
@@ -110,8 +114,13 @@ Sources/Toolbelt/
   카카오톡은 통화 종료 즉시 마이크를 놓는다. 우리 녹음 중에는 `com.apple.replayd`(ScreenCaptureKit)가 마이크 사용자로 보인다(대상 아님).
   Chrome·Slack은 `.helper` 프로세스, Safari는 `com.apple.WebKit.GPU`가 마이크를 쓴다. 전화·FaceTime은 시스템 데몬일 수 있어 실제 번들 ID를
   로그("마이크 사용 중인 프로세스")로 확인해 `CallApps`를 보정한다. 브라우저는 창 제목에 회의 서비스 이름이 있을 때만. AI 음성 대화 앱은 대상이 아니다.
-  사용자 회의 사이트 단어는 UserDefaults `callCustomKeywords` (기본 단어보다 먼저 본다, 제목에는 그 단어가 앱 이름으로 쓰임).
+  브라우저 회의 서비스(이름 + 단어 목록, 위에서부터 먼저 맞는 것)는 UserDefaults `callMeetingServices`(JSON). 예전 `callCustomKeywords`는 처음 읽을 때 맨 위 서비스로 옮겨진다.
+  브라우저는 **시작할 때만** 창 제목을 본다. 시작 후에는 그 프로세스(`Call.processPrefix`)가 마이크를 쓰는지로만 종료를 판단한다 — 탭을 바꾸면 제목이 바뀌어 녹음이 끊기던 버그.
+  앱·브라우저별 끄기는 UserDefaults `callDisabledTargets` (앱은 이름, 브라우저·추가한 앱은 번들 ID).
+  사용자가 추가한 통화 앱은 `callCustomApps`(JSON, 이름+번들 ID, 앞부분 일치라 helper 프로세스도 잡힘).
   자동 녹음 제목: "<앱> 통화 녹음 · HH:mm". 직접 시작한 녹음은 통화가 끝나도 멈추지 않는다.
+- **컴퓨터 소리 녹음**: ScreenCaptureKit 시스템 오디오에는 Mac 전화 앱(연속성 통화) 소리가 들어오지 않았다(2026-10-21, 25분 무음, Discord는 정상).
+  → Core Audio 프로세스 탭(`AudioHardwareCreateProcessTap`)으로 받는다. 권한은 '시스템 오디오 녹음'(`NSAudioCaptureUsageDescription`).
 - **전사**: Apple 기기 내 엔진(SpeechAnalyzer). 원본 오디오와 시간 데이터(`transcript-apple.json`)를 함께 보관해 다른 엔진 결과를
   `transcript-<엔진>.json`으로 나란히 둘 수 있게 한다. Claude API에는 음성 전사 기능이 없다.
 - **클립보드 저장에 키체인을 쓰지 않는다**: 팀 ID 없는 자체 서명 앱의 키체인 항목은 partition_id가 `cdhash:…`(빌드별)라,
@@ -125,6 +134,9 @@ Sources/Toolbelt/
 - **온도**: HID 온도 센서(IOHIDServiceClientCopyEvent)는 macOS 26에서 값이 오지 않아 SMC를 쓴다.
   M4 Max에는 `Tp…` 키가 100개 가까이 있지만 40.0 고정값·보정값이라 쓰면 안 된다 → `Tf0…` 키가 있으면 `Te0…`+`Tf0…`만 사용.
   `Tf06`은 81.7°C 고정이라 평균 대신 중앙값을 쓴다. 부하 시험으로 `Te0…`·`Tf04/08/09`가 오르는 것을 확인했다.
+- **사이트 차단**: 자체 서명이라 스크린 타임 API(FamilyControls)·네트워크 필터(NEFilter)는 쓸 수 없다(Apple 특수 권한 필요) → `/etc/hosts`.
+  root 도우미(`/Library/Application Support/Toolbelt/`, root 소유 폴더) + 사용자 소유 목록 파일. 목록 파일은 폴더 권한 때문에 atomic 쓰기를 못 하므로 그 자리에 쓴다.
+  스크립트는 `TOOLBELT_HOSTS`로 가짜 hosts에 시험할 수 있다(목록 형식 검사·되돌리기 확인함). 실제 /etc/hosts 시험은 관리자 암호가 필요해 사용자가 한다.
 - **재생**: `RecordingPlayer.updatePosition()`은 `pause()`에서도 부르므로 그 안에서 `pause()`를 부르면 무한 재귀(크래시)가 난다.
 - **창 배치**: 가상 키 입력으로 보낸 단축키에서 크기만 바뀌고 위치가 그대로인 경우가 관찰됐다(실사용에서는 문제없음).
   재발하면 `WindowMover.perform`의 AX 에러 코드를 로그로 남기고 위치→크기→위치 순서로 설정해 볼 것.

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CapsLockSwitch.start()
         RecordingController.shared.startServices()
         ClipboardHistory.shared.start()
+        SiteBlocker.shared.start()
         // 처음 설치한 사용자에게는 시작 안내(권한·선택 기능)를, 기존 사용자에게는 손쉬운 사용 권한 요청만
         if OnboardingWindowController.shared.shouldShowOnLaunch {
             OnboardingWindowController.shared.show()

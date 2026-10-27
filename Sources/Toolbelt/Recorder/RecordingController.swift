@@ -61,19 +61,45 @@ final class RecordingController: ObservableObject {
 
     // MARK: - 통화 자동 녹음
 
-    /// 회의 사이트 단어 (브라우저 창 제목에 있으면 통화로 본다)
-    @Published private(set) var customKeywords: [String] = CallApps.customKeywords
-
-    func addCustomKeyword(_ word: String) {
-        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !customKeywords.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
-        customKeywords.append(trimmed)
-        UserDefaults.standard.set(customKeywords, forKey: CallApps.customKeywordsKey)
+    /// 브라우저 회의 서비스 (이름 + 창 제목 단어들)
+    @Published var meetingServices: [MeetingService] = CallApps.meetingServices {
+        didSet { if meetingServices != oldValue { CallApps.meetingServices = meetingServices } }
     }
 
-    func removeCustomKeyword(_ word: String) {
-        customKeywords.removeAll { $0 == word }
-        UserDefaults.standard.set(customKeywords, forKey: CallApps.customKeywordsKey)
+    /// 새 서비스는 맨 위에 둔다 (먼저 맞춰 본다)
+    func addMeetingService(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        meetingServices.insert(MeetingService(name: trimmed, keywords: [trimmed]), at: 0)
+    }
+
+    /// 지운 기본 서비스를 이름 기준으로 다시 넣는다
+    func restoreDefaultMeetingServices() {
+        let names = Set(meetingServices.map { $0.name.lowercased() })
+        meetingServices += CallApps.defaultMeetingServices.filter { !names.contains($0.name.lowercased()) }
+    }
+
+    /// 자동 녹음에서 끈 앱·브라우저 (CallApps.Target.id)
+    @Published private(set) var disabledCallTargets: Set<String> = CallApps.disabledTargets
+
+    /// 사용자가 추가한 통화 앱
+    @Published private(set) var customCallApps: [CallApps.CustomApp] = CallApps.customApps
+
+    func addCustomCallApp(_ app: CallApps.CustomApp) {
+        guard !customCallApps.contains(where: { $0.bundleID == app.bundleID }) else { return }
+        customCallApps.append(app)
+        CallApps.customApps = customCallApps
+    }
+
+    func removeCustomCallApp(bundleID: String) {
+        customCallApps.removeAll { $0.bundleID == bundleID }
+        CallApps.customApps = customCallApps
+        setCallTarget(bundleID, enabled: true)
+    }
+
+    func setCallTarget(_ id: String, enabled: Bool) {
+        if enabled { disabledCallTargets.remove(id) } else { disabledCallTargets.insert(id) }
+        UserDefaults.standard.set(disabledCallTargets.sorted(), forKey: CallApps.disabledTargetsKey)
     }
 
     func setAutoRecordCalls(_ on: Bool) {

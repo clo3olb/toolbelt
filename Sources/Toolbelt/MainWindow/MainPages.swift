@@ -285,6 +285,7 @@ struct SettingsPage: View {
             Card(title: "녹음") {
                 Toggle("통화 자동 녹음", isOn: Binding(get: { recorder.autoRecordCalls }, set: recorder.setAutoRecordCalls))
                     .toggleStyle(.switch)
+                CallTargetsEditor(recorder: recorder)
                 MeetingKeywordsEditor(recorder: recorder)
                 HStack {
                     Text(RecordingStore.root.path).font(.caption.monospaced()).foregroundStyle(.secondary)
@@ -333,33 +334,119 @@ private struct UpdateCard: View {
     }
 }
 
-/// 회의 사이트 단어: 브라우저 창 제목에 이 단어가 있고 브라우저가 마이크를 쓰면 통화로 보고 자동 녹음한다.
+/// 자동 녹음할 앱·브라우저를 고른다. 설치된 것만 보여준다.
+private struct CallTargetsEditor: View {
+    @ObservedObject var recorder: RecordingController
+    @State private var liveApps: [CallApps.CustomApp] = []
+    @State private var notice: String?
+    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    /// 기본 앱은 설치된 것만, 직접 추가한 앱은 항상 보인다
+    private var targets: [CallApps.Target] {
+        _ = recorder.customCallApps
+        return CallApps.targets.filter { $0.isCustom || $0.isInstalled }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("자동 녹음할 프로그램").font(.callout.weight(.medium))
+            Text("켜 둔 프로그램이 마이크를 쓰면 통화로 보고 녹음합니다. 브라우저는 창 제목에 아래 회의 서비스의 단어가 있을 때만입니다. 목록에 없는 통화 앱은 '앱 추가…'로 넣으세요.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            group("통화 앱", targets.filter { !$0.isBrowser })
+            HStack(spacing: 8) {
+                Button("앱 추가…", action: chooseApp).controlSize(.small)
+                if let notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            }
+            // 지금 마이크를 쓰는데 목록에 없는 앱 → 바로 추가
+            if !liveApps.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("지금 마이크를 쓰는 앱 (목록에 없음)").font(.caption.weight(.medium))
+                    ForEach(liveApps, id: \.bundleID) { app in
+                        HStack {
+                            Text(app.name).font(.callout)
+                            Text(app.bundleID).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("추가") { recorder.addCustomCallApp(app); refresh() }.controlSize(.small)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            }
+            group("브라우저", targets.filter(\.isBrowser))
+        }
+        .disabled(!recorder.autoRecordCalls)
+        .onAppear(perform: refresh)
+        .onReceive(timer) { _ in refresh() }
+    }
+
+    @ViewBuilder
+    private func group(_ title: String, _ items: [CallApps.Target]) -> some View {
+        if !items.isEmpty {
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 6) {
+                ForEach(items) { target in
+                    HStack(spacing: 4) {
+                        Toggle(target.name, isOn: Binding(get: { !recorder.disabledCallTargets.contains(target.id) },
+                                                          set: { recorder.setCallTarget(target.id, enabled: $0) }))
+                            .toggleStyle(.checkbox)
+                        if target.isCustom {
+                            Button { recorder.removeCustomCallApp(bundleID: target.id) } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).foregroundStyle(.secondary).help("목록에서 빼기")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func refresh() {
+        liveApps = CallApps.untrackedAppsUsingMicrophone()
+    }
+
+    private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "추가"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let app = CallApps.customApp(at: url) {
+            recorder.addCustomCallApp(app)
+            notice = nil
+        } else {
+            notice = "이미 목록에 있거나 앱 정보를 읽지 못했습니다."
+        }
+    }
+}
+
+/// 브라우저 회의 서비스: 브라우저가 마이크를 쓸 때 창 제목에 서비스의 단어(별명)가 있으면 그 이름으로 자동 녹음한다.
 private struct MeetingKeywordsEditor: View {
     @ObservedObject var recorder: RecordingController
-    @State private var draft = ""
+    @State private var newService = ""
     @State private var liveBrowsers: [(browser: String, titles: [String])] = []
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("회의 사이트 단어").font(.callout.weight(.medium))
-            Text("브라우저(Chrome·Arc·Safari·Edge·Whale)에서 통화할 때, 창 제목에 아래 단어가 있으면 자동 녹음합니다. Meet·Zoom·Teams·Webex 등은 기본으로 포함돼 있습니다.")
+            Text("브라우저 회의 서비스").font(.callout.weight(.medium))
+            Text("브라우저로 통화할 때 창 제목에 서비스의 단어 중 하나가 있으면 그 서비스 이름으로 자동 녹음합니다 (대소문자 무시, 위에서부터 먼저 맞는 것). 녹음이 시작된 뒤에는 다른 탭으로 옮겨도 브라우저가 마이크를 쓰는 동안 계속 녹음합니다.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                ForEach(recorder.customKeywords, id: \.self) { word in
-                    HStack(spacing: 4) {
-                        Text(word).font(.callout)
-                        Button { recorder.removeCustomKeyword(word) } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+
+            ForEach($recorder.meetingServices) { $service in
+                MeetingServiceRow(service: $service) {
+                    recorder.meetingServices.removeAll { $0.id == service.id }
                 }
-                TextField("단어 추가", text: $draft).textFieldStyle(.roundedBorder).frame(width: 140)
-                    .onSubmit { recorder.addCustomKeyword(draft); draft = "" }
-                Button("추가") { recorder.addCustomKeyword(draft); draft = "" }.controlSize(.small)
-                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+
+            HStack(spacing: 6) {
+                TextField("새 서비스 이름 (예: 사내 회의)", text: $newService).textFieldStyle(.roundedBorder).frame(width: 200)
+                    .onSubmit(addService)
+                Button("서비스 추가", action: addService).controlSize(.small)
+                    .disabled(newService.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+                Button("기본 서비스 복원", action: recorder.restoreDefaultMeetingServices).controlSize(.small)
+            }
+
             // 지금 브라우저로 통화 중이면 창 제목을 보여줘 어떤 단어를 넣을지 알 수 있게 한다
             if !liveBrowsers.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -382,8 +469,92 @@ private struct MeetingKeywordsEditor: View {
         .onReceive(timer) { _ in refresh() }
     }
 
+    private func addService() {
+        recorder.addMeetingService(name: newService)
+        newService = ""
+    }
+
     private func refresh() {
         liveBrowsers = CallApps.browsersUsingMicrophone()
+    }
+}
+
+/// 회의 서비스 한 줄: 켜기 · 이름 · 단어(별명) 칩 · 단어 추가 · 삭제
+private struct MeetingServiceRow: View {
+    @Binding var service: MeetingService
+    let onDelete: () -> Void
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Toggle("", isOn: $service.enabled).toggleStyle(.checkbox).labelsHidden()
+            TextField("이름", text: $service.name).textFieldStyle(.roundedBorder).frame(width: 130)
+            FlowChips(words: service.keywords) { word in service.keywords.removeAll { $0 == word } }
+            TextField("단어 추가", text: $draft).textFieldStyle(.roundedBorder).frame(width: 100)
+                .onSubmit(addWord)
+            Spacer(minLength: 0)
+            Button(action: onDelete) { Image(systemName: "trash") }.buttonStyle(.borderless).help("서비스 삭제")
+        }
+        .opacity(service.enabled ? 1 : 0.5)
+    }
+
+    private func addWord() {
+        let word = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        guard !word.isEmpty, !service.keywords.contains(where: { $0.caseInsensitiveCompare(word) == .orderedSame }) else { return }
+        service.keywords.append(word)
+    }
+}
+
+/// 지울 수 있는 단어 칩들 (넘치면 다음 줄로)
+private struct FlowChips: View {
+    let words: [String]
+    let onRemove: (String) -> Void
+
+    var body: some View {
+        FlowLayout(spacing: 4) {
+            ForEach(words, id: \.self) { word in
+                HStack(spacing: 3) {
+                    Text(word).font(.caption)
+                    Button { onRemove(word) } label: { Image(systemName: "xmark.circle.fill").font(.caption) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+            }
+        }
+    }
+}
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal.width ?? .infinity, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, point) in zip(subviews, arrange(bounds.width, subviews).points) {
+            subview.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(_ width: CGFloat, _ subviews: Subviews) -> (size: CGSize, points: [CGPoint]) {
+        var points: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            points.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            maxX = max(maxX, x - spacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (CGSize(width: maxX, height: y + rowHeight), points)
     }
 }
 

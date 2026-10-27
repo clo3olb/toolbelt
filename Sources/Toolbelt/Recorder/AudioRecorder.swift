@@ -3,8 +3,9 @@ import ScreenCaptureKit
 
 /// 마이크와 컴퓨터 소리를 ScreenCaptureKit 한 스트림으로 받아 **각각 다른 파일**로 저장한다.
 ///   mic.m4a    — 내 마이크 (SCStreamOutputType.microphone)
-///   system.m4a — 컴퓨터에서 나는 소리 (SCStreamOutputType.audio, Toolbelt 자신의 소리는 제외)
-/// 두 트랙은 같은 시계를 쓰므로 첫 샘플 시각 차이(offset)를 저장해 두면 전사 결과를 시간순으로 합칠 수 있다.
+///   system.m4a — 컴퓨터에서 나는 소리. Core Audio 프로세스 탭(SystemAudioTap)으로 받고,
+///                탭을 만들 수 없으면 SCStreamOutputType.audio로 받는다. Toolbelt 자신의 소리는 제외.
+/// 두 트랙은 같은 호스트 시계를 쓰므로 첫 샘플 시각 차이(offset)를 저장해 두면 전사 결과를 시간순으로 합칠 수 있다.
 final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     struct Result {
         let duration: TimeInterval
@@ -17,6 +18,7 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private var mic: TrackWriter?
     private var system: TrackWriter?
+    private var tap: SystemAudioTap?
     /// 녹음 중 스트림이 끊기면 호출 (권한 해제, 디스플레이 변경 등)
     var onStop: ((Error?) -> Void)?
 
@@ -24,8 +26,19 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else { throw RecorderError.noDisplay }
 
+        let systemURL = folder.appendingPathComponent(RecordingStore.systemFile)
+        let tap = SystemAudioTap(url: systemURL)
+        do {
+            try tap.start()
+            self.tap = tap
+        } catch {
+            tap.stop()
+            NSLog("Toolbelt: \(error.localizedDescription) — ScreenCaptureKit 시스템 오디오로 녹음")
+            system = TrackWriter(url: systemURL)
+        }
+
         let config = SCStreamConfiguration()
-        config.capturesAudio = true
+        config.capturesAudio = self.tap == nil
         config.excludesCurrentProcessAudio = true
         config.captureMicrophone = true
         config.microphoneCaptureDeviceID = AVCaptureDevice.default(for: .audio)?.uniqueID
@@ -38,14 +51,19 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         config.showsCursor = false
 
         mic = TrackWriter(url: folder.appendingPathComponent(RecordingStore.micFile))
-        system = TrackWriter(url: folder.appendingPathComponent(RecordingStore.systemFile))
 
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
-        try await stream.startCapture()
+        do {
+            try await stream.startCapture()
+        } catch {
+            self.tap?.stop()
+            self.tap = nil
+            throw error
+        }
         self.stream = stream
     }
 
@@ -55,17 +73,21 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         let (mic, system) = queue.sync { (self.mic, self.system) }
         await mic?.finish()
         await system?.finish()
+        tap?.stop()
         self.mic = nil
         self.system = nil
 
-        let starts = [mic?.firstPTS, system?.firstPTS].compactMap { $0 }
-        let ends = [mic?.lastPTS, system?.lastPTS].compactMap { $0 }
+        let systemFirst = tap?.firstPTS ?? system?.firstPTS
+        let systemLast = tap?.lastPTS ?? system?.lastPTS
+        tap = nil
+        let starts = [mic?.firstPTS, systemFirst].compactMap { $0 }
+        let ends = [mic?.lastPTS, systemLast].compactMap { $0 }
         guard let start = starts.min(), let end = ends.max() else {
             return Result(duration: 0, micOffset: nil, systemOffset: nil)
         }
         return Result(duration: (end - start).seconds,
                       micOffset: mic?.firstPTS.map { ($0 - start).seconds },
-                      systemOffset: system?.firstPTS.map { ($0 - start).seconds })
+                      systemOffset: systemFirst.map { ($0 - start).seconds })
     }
 
     // MARK: - SCStreamOutput / SCStreamDelegate

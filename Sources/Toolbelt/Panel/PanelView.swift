@@ -57,6 +57,7 @@ struct FeatureSection: View {
         switch feature {
         case .recording: RecordingSection(controller: .shared)
         case .clipboard: ClipboardPanelSection(history: .shared, model: model)
+        case .siteBlock: SiteBlockPanelSection(blocker: .shared, model: model)
         case .system: SystemPanelSection(model: model)
         case .storage: StoragePanelSection(model: model)
         case .windowSnap: WindowSnapPanelSection(model: model)

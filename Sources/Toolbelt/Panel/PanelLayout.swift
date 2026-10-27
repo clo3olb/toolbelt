@@ -2,7 +2,7 @@ import AppKit
 
 /// 기능 단위. 팝오버 섹션이자 메인 창 사이드바 항목이다.
 enum FeatureID: String, CaseIterable, Identifiable, Codable {
-    case recording, clipboard, system, storage, windowSnap, display, keyboard
+    case recording, clipboard, siteBlock, system, storage, windowSnap, display, keyboard
 
     var id: String { rawValue }
 
@@ -10,6 +10,7 @@ enum FeatureID: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .recording: return "녹음"
         case .clipboard: return "클립보드"
+        case .siteBlock: return "사이트 차단"
         case .system: return "시스템"
         case .storage: return "저장 장치"
         case .windowSnap: return "창 배치"
@@ -22,6 +23,7 @@ enum FeatureID: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .recording: return "waveform"
         case .clipboard: return "doc.on.clipboard"
+        case .siteBlock: return "hand.raised"
         case .system: return "gauge.with.dots.needle.67percent"
         case .storage: return "externaldrive"
         case .windowSnap: return "rectangle.split.2x1"
